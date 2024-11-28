@@ -16,6 +16,39 @@ def get_permission_from_table_html(html):
 
 
 @pytest.fixture
+def db_with_dot_in_name(tmpdir):
+    path = str(tmpdir / "db.with.dot.in.name.db")
+    db = sqlite_utils.Database(path)
+    db["students"].insert_all(
+        [
+            {"name": "alex", "age": 10},
+            {"name": "brian", "age": 20},
+            {"name": "craig", "age": 30, "[weird (column)]": 1},
+        ]
+    )
+    db.execute("create table courses(name text primary key) without rowid")
+    db["courses"].insert_all(
+        [
+            {"name": "MATH 101"},
+            {"name": "MATH 102"},
+        ]
+    )
+    return path
+
+
+students_metadata = {
+    "databases": {
+        "students": {
+            "tables": {"students": {"permissions": {"insert-row": {"id": "apollo"}}}}
+        }
+    }
+}
+
+actor_root = {"a": {"id": "root"}}
+actor_apollo = {"a": {"id": "apollo"}}
+
+
+@pytest.fixture
 def students_db_path(tmpdir):
     path = str(tmpdir / "students.db")
     db = sqlite_utils.Database(path)
@@ -46,7 +79,6 @@ students_metadata = {
 
 actor_root = {"a": {"id": "root"}}
 actor_apollo = {"a": {"id": "apollo"}}
-
 
 @pytest.mark.asyncio
 async def test_plugin_is_installed():
@@ -119,6 +151,28 @@ async def test_insert_row_details_route(students_db_path):
         ]
     }
 
+
+@pytest.mark.asyncio
+async def test_insert_row_details_route(students_db_path):
+    datasette = Datasette([students_db_path])
+
+    response = await datasette.client.get(
+        "/-/datasette-write-ui/insert-row-details?db=students&table=students",
+    )
+    assert response.status_code == 403
+
+    response = await datasette.client.get(
+        "/-/datasette-write-ui/insert-row-details?db=students&table=students",
+        cookies={"ds_actor": datasette.sign(actor_root, "actor")},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "fields": [
+            {"name": "name", "affinity": "text"},
+            {"name": "age", "affinity": "int"},
+            {"name": "_weird (column)_", "affinity": "int"},
+        ]
+    }
 
 @pytest.mark.asyncio
 async def test_update_row_details_route(students_db_path):
@@ -220,3 +274,17 @@ async def test_base_url(students_db_path, base_url):
         if base_url:
             expected_static_path = base_url.rstrip("/") + expected_static_path
         assert expected_static_path in response.text
+
+@pytest.mark.asyncio
+async def test_tildedecode(db_with_dot_in_name):
+    datasette = Datasette(
+        [db_with_dot_in_name],
+        metadata=students_metadata,
+    )
+    response = await datasette.client.get("/-/datasette-write-ui/insert-row-details?db=db%7E2Ewith%7E2Edot%7E2Ein%7E2Ename&table=courses", 
+                                          cookies={"ds_actor": datasette.sign(actor_root, "actor")})
+    assert response.status_code == 200
+
+    response = await datasette.client.get("/-/datasette-write-ui/edit-row-details?db=db%7E2Ewith%7E2Edot%7E2Ein%7E2Ename&table=courses&primaryKeys=MATH+101", 
+                                          cookies={"ds_actor": datasette.sign(actor_root, "actor")})
+    assert response.status_code == 200

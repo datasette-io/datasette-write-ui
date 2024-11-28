@@ -54,8 +54,8 @@ class EditRowDetailsField(TypedDict):
 
 
 async def edit_row_details(scope, receive, datasette, request):
-    db_name = request.args.get("db")
-    table_name = request.args.get("table")
+    db_name = tilde_decode(request.args.get("db"))
+    table_name = tilde_decode(request.args.get("table"))
     pks = request.args.get("primaryKeys")
 
     if not await datasette.permission_allowed(
@@ -148,8 +148,8 @@ async def insert_row_details(scope, receive, datasette, request):
     Returns:
       fields: List[InsertRowDetailField]
     """
-    db_name = request.args.get("db")
-    table_name = request.args.get("table")
+    db_name = tilde_decode(request.args.get("db"))
+    table_name = tilde_decode(request.args.get("table"))
 
     if not await datasette.permission_allowed(
         request.actor, "insert-row", (db_name, table_name)
